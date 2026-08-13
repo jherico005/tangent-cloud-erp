@@ -51,6 +51,7 @@ import { ChatFloatingTrigger } from './components/chat/ChatFloatingTrigger';
 
 import { azureApi } from './services/azureApi';
 import { chatService } from './services/chatService';
+import { supabaseAuthService } from './services/supabaseAuthService';
 import { ACCOUNT_CHANNELS_LIST, playTeamsNotificationSound } from './data/accountChannels';
 import { CheckCircle2, X, ShieldAlert, WifiOff, RefreshCw, LogOut } from 'lucide-react';
 import { TangentLoadingScreen } from './components/common/TangentLoadingScreen';
@@ -72,17 +73,40 @@ export default function App() {
     return list;
   });
 
-  // Load live Users & eFSR Records from Azure API on mount
+  // Load live Users & eFSR Records from Supabase & Azure API on mount
   useEffect(() => {
     let isMounted = true;
-    const initAzureData = async () => {
+
+    const initData = async () => {
       try {
+        // Fetch users from Supabase Realtime Database
+        const spUsers = await supabaseAuthService.getUsers();
+        if (isMounted && spUsers && spUsers.length > 0) {
+          setUsers(prev => {
+            const combined = [...spUsers];
+            prev.forEach(u => {
+              if (!combined.some(s => s.username === u.username)) {
+                combined.push(u);
+              }
+            });
+            return combined;
+          });
+        }
+
         const health = await azureApi.checkHealth();
         if (isMounted) setIsAzureConnected(health.azureDbConnected);
 
         const liveUsers = await azureApi.getUsers();
         if (isMounted && liveUsers && liveUsers.length > 0) {
-          setUsers(liveUsers);
+          setUsers(prev => {
+            const combined = [...liveUsers];
+            prev.forEach(u => {
+              if (!combined.some(c => c.username === u.username)) {
+                combined.push(u);
+              }
+            });
+            return combined;
+          });
         }
 
         const liveEFSRs = await azureApi.getEFSRRecords();
@@ -90,12 +114,30 @@ export default function App() {
           setEfsrRecords(liveEFSRs);
         }
       } catch (err) {
-        console.warn('Azure API initial load notice:', err);
+        console.warn('Initial load notice:', err);
       }
     };
 
-    initAzureData();
-    return () => { isMounted = false; };
+    initData();
+
+    // Subscribe to real-time user database updates from Supabase
+    const unsubscribeUserSync = supabaseAuthService.subscribeToUserUpdates((updatedUser) => {
+      if (!isMounted) return;
+      setUsers(prev => {
+        const index = prev.findIndex(u => u.username === updatedUser.username || u.id === updatedUser.id);
+        if (index >= 0) {
+          const updatedList = [...prev];
+          updatedList[index] = { ...updatedList[index], ...updatedUser };
+          return updatedList;
+        }
+        return [updatedUser, ...prev];
+      });
+    });
+
+    return () => { 
+      isMounted = false; 
+      unsubscribeUserSync();
+    };
   }, []);
 
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {

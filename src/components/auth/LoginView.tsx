@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppUser } from '../../types';
 import { TangentLoadingScreen, TangentLogoSVG } from '../common/TangentLoadingScreen';
+import { supabaseAuthService } from '../../services/supabaseAuthService';
 import { 
   ShieldCheck, 
   Lock, 
@@ -16,7 +17,10 @@ import {
   Fingerprint,
   Sun,
   Moon,
-  WifiOff
+  UserPlus,
+  Building,
+  Phone,
+  Mail
 } from 'lucide-react';
 
 interface LoginViewProps {
@@ -42,11 +46,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
   onToggleTheme: propOnToggleTheme
 }) => {
   // State
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('jcpantaleon');
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
   const [presetSearch, setPresetSearch] = useState('');
+
+  // Registration Form State
+  const [regName, setRegName] = useState('');
+  const [regUsername, setRegUsername] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regRole, setRegRole] = useState<string>('field-technician');
+  const [regDepartment, setRegDepartment] = useState('Field Engineering');
+  const [regContact, setRegContact] = useState('09170000000');
+  const [isRegistering, setIsRegistering] = useState(false);
   
   // Theme State persisted across Login & Logout
   const [localIsDarkMode, setLocalIsDarkMode] = useState<boolean>(() => {
@@ -135,10 +151,23 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }, 1100);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setSuccessMsg('');
 
+    // 1. Try Supabase Realtime Database Login first
+    const spResult = await supabaseAuthService.loginUser(username, password);
+    if (spResult.success && spResult.user) {
+      if (spResult.user.status === 'Inactive') {
+        setErrorMsg('This account is currently marked as INACTIVE. Please contact system admin.');
+        return;
+      }
+      triggerAuthSequence(spResult.user);
+      return;
+    }
+
+    // 2. Fall back to local users list (e.g., admin / jcpantaleon or preset users)
     const targetUser = users.find(
       u => u.username.toLowerCase() === username.trim().toLowerCase() && u.password === password
     );
@@ -151,6 +180,39 @@ export const LoginView: React.FC<LoginViewProps> = ({
       triggerAuthSequence(targetUser);
     } else {
       setErrorMsg('Invalid Username or Password. (Default Super Admin: admin / jcpantaleon)');
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!regUsername.trim() || !regPassword || !regName.trim()) {
+      setErrorMsg('Please complete all required fields (Name, Username, Password).');
+      return;
+    }
+
+    setIsRegistering(true);
+    const result = await supabaseAuthService.registerUser({
+      name: regName.trim(),
+      username: regUsername.trim().toLowerCase(),
+      email: regEmail.trim() || `${regUsername.trim().toLowerCase()}@tangentsolutionsinc.com`,
+      password: regPassword,
+      role: regRole as any,
+      department: regDepartment,
+      contactNumber: regContact
+    });
+
+    setIsRegistering(false);
+
+    if (result.success && result.user) {
+      setSuccessMsg(`Account successfully registered in Supabase Database! Logging in as ${result.user.name}...`);
+      setTimeout(() => {
+        triggerAuthSequence(result.user!);
+      }, 1000);
+    } else {
+      setErrorMsg(result.error || 'Failed to register account in Supabase Database.');
     }
   };
 
@@ -325,7 +387,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               />
             )}
             <div>
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className={`text-xl font-extrabold flex items-center gap-2 ${
                     isDarkMode ? 'text-white' : 'text-slate-900'
@@ -334,17 +396,45 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     <span>System Authentication</span>
                   </h2>
                   <p className={`text-xs mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Enter your cloud credentials to access your portal view.
+                    Connected to Supabase Realtime Database & Auth.
                   </p>
                 </div>
                 <span className={`px-3 py-1 text-[10px] font-bold rounded-full flex items-center gap-1 shadow-xs ${
                   isDarkMode 
-                    ? 'bg-cyan-950/80 text-cyan-400 border border-cyan-800' 
-                    : 'bg-blue-50 text-blue-700 border border-blue-200'
+                    ? 'bg-emerald-950/90 text-emerald-400 border border-emerald-800' 
+                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                 }`}>
-                  <Globe className="w-3 h-3" />
-                  <span>SSL Encrypted</span>
+                  <Globe className="w-3 h-3 text-emerald-400 animate-pulse" />
+                  <span>Supabase Sync Active</span>
                 </span>
+              </div>
+
+              {/* AUTH MODE TOGGLE TABS */}
+              <div className="flex rounded-xl p-1 mb-4 bg-slate-800/40 border border-slate-700/50">
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('login'); setErrorMsg(''); setSuccessMsg(''); }}
+                  className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                    authMode === 'login'
+                      ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Sign In</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('register'); setErrorMsg(''); setSuccessMsg(''); }}
+                  className={`flex-1 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                    authMode === 'register'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Register New Account</span>
+                </button>
               </div>
 
               {errorMsg && (
@@ -354,95 +444,204 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleLogin} className="space-y-4 text-xs">
-                <div className="space-y-1.5">
-                  <label className={`font-bold block tracking-wide ${
-                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
+              {successMsg && (
+                <div className="mb-4 p-3 bg-emerald-950/90 border border-emerald-700/80 rounded-xl text-emerald-200 text-xs flex items-center space-x-2 shadow-md">
+                  <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 flex-shrink-0" />
+                  <span className="font-bold">{successMsg}</span>
+                </div>
+              )}
+
+              {authMode === 'login' ? (
+                /* LOGIN FORM */
+                <form onSubmit={handleLogin} className="space-y-4 text-xs">
+                  <div className="space-y-1.5">
+                    <label className={`font-bold block tracking-wide ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                    }`}>
+                      Username / Account ID
+                    </label>
+                    <div className="relative group/input">
+                      <User className={`w-4 h-4 absolute left-3 top-3 transition-colors ${
+                        isDarkMode 
+                          ? 'text-slate-500 group-focus-within/input:text-cyan-400' 
+                          : 'text-slate-400 group-focus-within/input:text-blue-600'
+                      }`} />
+                      <input
+                        type="text"
+                        required
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="e.g. admin"
+                        className={`w-full border rounded-xl pl-9 pr-3 py-2.5 font-semibold transition-all focus:outline-none focus:ring-2 ${
+                          isDarkMode 
+                            ? 'bg-slate-950/90 border-slate-800 text-white placeholder-slate-600 focus:border-cyan-500 focus:ring-cyan-500/30' 
+                            : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-blue-500/20'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className={`font-bold block tracking-wide ${
+                      isDarkMode ? 'text-slate-300' : 'text-slate-700'
+                    }`}>
+                      Password
+                    </label>
+                    <div className="relative group/input">
+                      <Lock className={`w-4 h-4 absolute left-3 top-3 transition-colors ${
+                        isDarkMode 
+                          ? 'text-slate-500 group-focus-within/input:text-cyan-400' 
+                          : 'text-slate-400 group-focus-within/input:text-blue-600'
+                      }`} />
+                      <input
+                        type="password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className={`w-full border rounded-xl pl-9 pr-3 py-2.5 font-semibold transition-all focus:outline-none focus:ring-2 ${
+                          isDarkMode 
+                            ? 'bg-slate-950/90 border-slate-800 text-white placeholder-slate-600 focus:border-cyan-500 focus:ring-cyan-500/30' 
+                            : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-blue-500/20'
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`flex items-center justify-between text-xs pt-1 ${
+                    isDarkMode ? 'text-slate-400' : 'text-slate-600'
                   }`}>
-                    Username / Account ID
-                  </label>
-                  <div className="relative group/input">
-                    <User className={`w-4 h-4 absolute left-3 top-3 transition-colors ${
+                    <label className="flex items-center space-x-2 cursor-pointer group/check">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className={`rounded cursor-pointer ${
+                          isDarkMode ? 'border-slate-700 bg-slate-950 text-cyan-500' : 'border-slate-300 text-blue-600'
+                        }`}
+                      />
+                      <span className="font-semibold">Remember session</span>
+                    </label>
+                    <span className={`cursor-pointer transition-colors font-semibold ${
+                      isDarkMode ? 'hover:text-cyan-400 text-slate-400' : 'hover:text-blue-700 text-slate-500'
+                    }`}>
+                      Supabase Cloud DB Active
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className={`w-full font-extrabold py-3 px-4 rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all duration-200 cursor-pointer active:scale-[0.98] relative overflow-hidden group/btn ${
                       isDarkMode 
-                        ? 'text-slate-500 group-focus-within/input:text-cyan-400' 
-                        : 'text-slate-400 group-focus-within/input:text-blue-600'
-                    }`} />
+                        ? 'bg-gradient-to-r from-[#1b497d] via-[#215a99] to-[#1b497d] hover:from-[#215a99] hover:to-[#215a99] text-white border border-blue-400/30' 
+                        : 'bg-[#1b497d] hover:bg-[#163a63] text-white border border-blue-800/40'
+                    }`}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover/btn:animate-sweep"></div>
+                    <span>Log In via Supabase Cloud</span>
+                    <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform text-cyan-200" />
+                  </button>
+                </form>
+              ) : (
+                /* REGISTRATION FORM BOUND TO SUPABASE */
+                <form onSubmit={handleRegister} className="space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Full Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        placeholder="e.g. Juan De La Cruz"
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Username *</label>
+                      <input
+                        type="text"
+                        required
+                        value={regUsername}
+                        onChange={(e) => setRegUsername(e.target.value)}
+                        placeholder="e.g. juan_delacruz"
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Email Address</label>
+                      <input
+                        type="email"
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        placeholder="juan@tangentsolutionsinc.com"
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Password *</label>
+                      <input
+                        type="password"
+                        required
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Role</label>
+                      <select
+                        value={regRole}
+                        onChange={(e) => setRegRole(e.target.value)}
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      >
+                        <option value="field-technician">Field Technician</option>
+                        <option value="dispatcher">Dispatcher</option>
+                        <option value="department-user">Department User</option>
+                        <option value="department-admin">Department Admin</option>
+                        <option value="super-admin">Super Admin</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-bold block mb-1 text-slate-300">Department</label>
+                      <input
+                        type="text"
+                        value={regDepartment}
+                        onChange={(e) => setRegDepartment(e.target.value)}
+                        placeholder="Field Engineering"
+                        className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold block mb-1 text-slate-300">Mobile / Contact Number</label>
                     <input
                       type="text"
-                      required
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="e.g. admin"
-                      className={`w-full border rounded-xl pl-9 pr-3 py-2.5 font-semibold transition-all focus:outline-none focus:ring-2 ${
-                        isDarkMode 
-                          ? 'bg-slate-950/90 border-slate-800 text-white placeholder-slate-600 focus:border-cyan-500 focus:ring-cyan-500/30' 
-                          : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-blue-500/20'
-                      }`}
+                      value={regContact}
+                      onChange={(e) => setRegContact(e.target.value)}
+                      placeholder="09170000000"
+                      className="w-full border rounded-xl px-3 py-2 bg-slate-950 border-slate-800 text-white focus:border-emerald-500 focus:outline-none"
                     />
                   </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <label className={`font-bold block tracking-wide ${
-                    isDarkMode ? 'text-slate-300' : 'text-slate-700'
-                  }`}>
-                    Password
-                  </label>
-                  <div className="relative group/input">
-                    <Lock className={`w-4 h-4 absolute left-3 top-3 transition-colors ${
-                      isDarkMode 
-                        ? 'text-slate-500 group-focus-within/input:text-cyan-400' 
-                        : 'text-slate-400 group-focus-within/input:text-blue-600'
-                    }`} />
-                    <input
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className={`w-full border rounded-xl pl-9 pr-3 py-2.5 font-semibold transition-all focus:outline-none focus:ring-2 ${
-                        isDarkMode 
-                          ? 'bg-slate-950/90 border-slate-800 text-white placeholder-slate-600 focus:border-cyan-500 focus:ring-cyan-500/30' 
-                          : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-blue-600 focus:ring-blue-500/20'
-                      }`}
-                    />
-                  </div>
-                </div>
-
-                <div className={`flex items-center justify-between text-xs pt-1 ${
-                  isDarkMode ? 'text-slate-400' : 'text-slate-600'
-                }`}>
-                  <label className="flex items-center space-x-2 cursor-pointer group/check">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className={`rounded cursor-pointer ${
-                        isDarkMode ? 'border-slate-700 bg-slate-950 text-cyan-500' : 'border-slate-300 text-blue-600'
-                      }`}
-                    />
-                    <span className="font-semibold">Remember session</span>
-                  </label>
-                  <span className={`cursor-pointer transition-colors font-semibold ${
-                    isDarkMode ? 'hover:text-cyan-400 text-slate-400' : 'hover:text-blue-700 text-slate-500'
-                  }`}>
-                    Help & Reset?
-                  </span>
-                </div>
-
-                <button
-                  type="submit"
-                  className={`w-full font-extrabold py-3 px-4 rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all duration-200 cursor-pointer active:scale-[0.98] relative overflow-hidden group/btn ${
-                    isDarkMode 
-                      ? 'bg-gradient-to-r from-[#1b497d] via-[#215a99] to-[#1b497d] hover:from-[#215a99] hover:to-[#215a99] text-white border border-blue-400/30' 
-                      : 'bg-[#1b497d] hover:bg-[#163a63] text-white border border-blue-800/40'
-                  }`}
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover/btn:animate-sweep"></div>
-                  <span>Log In to Cloud Portal</span>
-                  <ArrowRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform text-cyan-200" />
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    disabled={isRegistering}
+                    className="w-full mt-2 font-extrabold py-3 px-4 rounded-xl shadow-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 border border-emerald-400/30"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>{isRegistering ? 'Registering in Supabase...' : 'Register Account in Supabase'}</span>
+                  </button>
+                </form>
+              )}
             </div>
 
             {/* Quick Demo Preset Accounts Switcher */}
