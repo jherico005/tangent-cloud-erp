@@ -179,7 +179,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
       }
       triggerAuthSequence(targetUser);
     } else {
-      setErrorMsg('Invalid Username or Password. (Default Super Admin: admin / jcpantaleon)');
+      setErrorMsg(spResult.error || 'Invalid Username or Password.');
     }
   };
 

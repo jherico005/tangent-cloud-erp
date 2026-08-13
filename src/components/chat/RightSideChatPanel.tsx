@@ -132,17 +132,18 @@ export const RightSideChatPanel: React.FC<RightSideChatPanelProps> = ({
   const emojis = ['👍', '❤️', '😂', '😮', '📁', '🎉', '👏', '🙏'];
 
   const isAdminOrDispatcher = 
-    currentUser.role === 'Super Admin' ||
-    currentUser.role === 'super-admin' ||
-    currentUser.role === 'Department Admin' ||
-    currentUser.role === 'department-admin' ||
-    currentUser.role === 'dispatcher';
+    currentUser?.role === 'Super Admin' ||
+    currentUser?.role === 'super-admin' ||
+    currentUser?.role === 'Department Admin' ||
+    currentUser?.role === 'department-admin' ||
+    currentUser?.role === 'dispatcher';
 
-  const fieldTechs = users.filter(u => 
-    (u.role === 'Field Technician' || u.role === 'field-technician') &&
-    (u.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
-     u.employeeCode.toLowerCase().includes(contactSearch.toLowerCase()) ||
-     u.department.toLowerCase().includes(contactSearch.toLowerCase()))
+  const safeUsers = Array.isArray(users) ? users : [];
+  const fieldTechs = safeUsers.filter(u => 
+    (u?.role === 'Field Technician' || u?.role === 'field-technician') &&
+    ((u?.name || '').toLowerCase().includes(contactSearch.toLowerCase()) ||
+     (u?.employeeCode || '').toLowerCase().includes(contactSearch.toLowerCase()) ||
+     (u?.department || '').toLowerCase().includes(contactSearch.toLowerCase()))
   );
 
   const toggleStarContact = (contactId: string, e: React.MouseEvent) => {
@@ -154,17 +155,20 @@ export const RightSideChatPanel: React.FC<RightSideChatPanelProps> = ({
 
   useEffect(() => {
     let isMounted = true;
+    const currentUserId = currentUser?.id || 'usr-guest';
     const fetchHistory = async () => {
       let history: ChatMessage[] = [];
-      if (selectedContact.id === 'ALL') {
+      if (selectedContact?.id === 'ALL') {
         history = await chatService.getMessages(undefined, 'ALL');
-      } else {
-        history = await chatService.getMessages(currentUser.id, selectedContact.id);
+      } else if (selectedContact?.id) {
+        history = await chatService.getMessages(currentUserId, selectedContact.id);
       }
       
       if (isMounted) {
         setMessages(history);
-        chatService.markAsRead(selectedContact.id, currentUser.id);
+        if (selectedContact?.id) {
+          chatService.markAsRead(selectedContact.id, currentUserId);
+        }
       }
     };
 
@@ -173,7 +177,7 @@ export const RightSideChatPanel: React.FC<RightSideChatPanelProps> = ({
     const unsubscribe = chatService.subscribeToRealtimeMessages(
       (newMsg) => {
         if (!isMounted) return;
-        if (newMsg.senderId !== currentUser.id) {
+        if (newMsg?.senderId !== currentUserId) {
           playTeamsNotificationSound();
         }
         setMessages(prev => {

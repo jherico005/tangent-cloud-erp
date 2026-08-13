@@ -183,45 +183,52 @@ export const chatService = {
     let isSubscribed = true;
 
     // 1. Primary: Supabase Realtime Subscription Channel
-    const channelName = `realtime_chat_messages_${Date.now()}`;
-    const supabaseChannel = supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'chat_messages' },
-        (payload) => {
-          if (!isSubscribed) return;
-          if (onStatusChange) onStatusChange('Online');
+    const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const channelName = `realtime_chat_messages_${uniqueId}`;
+    let supabaseChannel: any = null;
 
-          if (payload.new) {
-            const item: any = payload.new;
-            const newMsg: ChatMessage = {
-              id: item.id || `msg-${Date.now()}`,
-              senderId: item.sender_id || item.senderId || 'usr-anon',
-              senderName: item.sender_name || item.senderName || 'User',
-              senderRole: item.sender_role || item.senderRole || 'User',
-              receiverId: item.receiver_id || item.receiverId || 'ALL',
-              receiverName: item.receiver_name || item.receiverName || 'Recipient',
-              ticketId: item.ticket_id || item.ticketId || '',
-              ticketType: (item.ticket_type || item.ticketType || undefined) as any,
-              message: item.message || '',
-              timestamp: item.timestamp || item.created_at || new Date().toISOString(),
-              status: item.status || 'Delivered',
-              isRead: item.is_read !== undefined ? item.is_read : (item.isRead || false),
-              attachmentUrl: item.attachment_url || item.attachmentUrl || '',
-              attachmentName: item.attachment_name || item.attachmentName || ''
-            };
-            onNewMessage(newMsg);
+    try {
+      supabaseChannel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'chat_messages' },
+          (payload) => {
+            if (!isSubscribed) return;
+            if (onStatusChange) onStatusChange('Online');
+
+            if (payload.new) {
+              const item: any = payload.new;
+              const newMsg: ChatMessage = {
+                id: item.id || `msg-${Date.now()}`,
+                senderId: item.sender_id || item.senderId || 'usr-anon',
+                senderName: item.sender_name || item.senderName || 'User',
+                senderRole: item.sender_role || item.senderRole || 'User',
+                receiverId: item.receiver_id || item.receiverId || 'ALL',
+                receiverName: item.receiver_name || item.receiverName || 'Recipient',
+                ticketId: item.ticket_id || item.ticketId || '',
+                ticketType: (item.ticket_type || item.ticketType || undefined) as any,
+                message: item.message || '',
+                timestamp: item.timestamp || item.created_at || new Date().toISOString(),
+                status: item.status || 'Delivered',
+                isRead: item.is_read !== undefined ? item.is_read : (item.isRead || false),
+                attachmentUrl: item.attachment_url || item.attachmentUrl || '',
+                attachmentName: item.attachment_name || item.attachmentName || ''
+              };
+              onNewMessage(newMsg);
+            }
           }
-        }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          if (onStatusChange) onStatusChange('Online');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          if (onStatusChange) onStatusChange('Offline');
-        }
-      });
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            if (onStatusChange) onStatusChange('Online');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            if (onStatusChange) onStatusChange('Offline');
+          }
+        });
+    } catch (err) {
+      console.warn('Supabase channel subscription error:', err);
+    }
 
     // 2. Secondary: Express SSE Stream Backup
     try {
@@ -277,10 +284,13 @@ export const chatService = {
     // Unsubscribe Cleanup
     return () => {
       isSubscribed = false;
-      try {
-        supabase.removeChannel(supabaseChannel);
-      } catch (e) {
-        // ignore
+      if (supabaseChannel) {
+        try {
+          supabaseChannel.unsubscribe();
+          supabase.removeChannel(supabaseChannel);
+        } catch (e) {
+          // ignore
+        }
       }
       if (sseEventSource) {
         sseEventSource.close();
