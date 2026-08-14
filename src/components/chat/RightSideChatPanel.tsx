@@ -176,11 +176,12 @@ export const RightSideChatPanel: React.FC<RightSideChatPanelProps> = ({
 
     const unsubscribe = chatService.subscribeToRealtimeMessages(
       (newMsg) => {
-        if (!isMounted) return;
-        if (newMsg?.senderId !== currentUserId) {
+        if (!isMounted || !newMsg) return;
+        if (newMsg.senderId !== currentUserId) {
           playTeamsNotificationSound();
         }
         setMessages(prev => {
+          // If message already exists by ID, replace with updated state
           const index = prev.findIndex(m => m.id === newMsg.id);
           if (index >= 0) {
             const updated = [...prev];
@@ -188,16 +189,46 @@ export const RightSideChatPanel: React.FC<RightSideChatPanelProps> = ({
             return updated;
           }
 
-          const isRelevant = 
-            newMsg.receiverId === 'ALL' ||
-            (selectedContact.id.startsWith('CHANNEL_') && newMsg.receiverId === selectedContact.id) ||
-            (newMsg.senderId === currentUser.id && newMsg.receiverId === selectedContact.id) ||
-            (newMsg.senderId === selectedContact.id && newMsg.receiverId === currentUser.id) ||
-            (newMsg.receiverId === currentUser.id);
+          const rawActiveId = (selectedContact?.id || 'ALL').trim().toLowerCase();
+          const rawMyId = (currentUserId || '').trim().toLowerCase();
+          const rawSenderId = (newMsg.senderId || '').trim().toLowerCase();
+          const rawReceiverId = (newMsg.receiverId || '').trim().toLowerCase();
 
-          if (isRelevant) {
+          // 1. Broadcast Thread Active
+          const isBroadcastThread = rawActiveId === 'all' || rawActiveId === 'broadcast';
+          const isMsgBroadcast = (
+            !rawReceiverId ||
+            rawReceiverId === 'all' ||
+            rawReceiverId === 'broadcast' ||
+            rawReceiverId === 'channel_all' ||
+            rawReceiverId === 'null' ||
+            rawReceiverId === 'undefined'
+          );
+
+          if (isBroadcastThread) {
+            if (isMsgBroadcast) {
+              return [...prev, newMsg];
+            }
+            return prev;
+          }
+
+          // 2. Account Channel Active (e.g. CHANNEL_GCASH, CHANNEL_MAYA)
+          if (rawActiveId.startsWith('channel_')) {
+            const matchesChannel = rawReceiverId === rawActiveId || (newMsg.ticketId && newMsg.ticketId.toLowerCase() === rawActiveId);
+            if (matchesChannel) {
+              return [...prev, newMsg];
+            }
+            return prev;
+          }
+
+          // 3. Direct 1-to-1 Chat Active
+          const isDirectFromMeToContact = rawSenderId === rawMyId && rawReceiverId === rawActiveId;
+          const isDirectFromContactToMe = rawSenderId === rawActiveId && (rawReceiverId === rawMyId || !rawReceiverId);
+
+          if (isDirectFromMeToContact || isDirectFromContactToMe) {
             return [...prev, newMsg];
           }
+
           return prev;
         });
       },
